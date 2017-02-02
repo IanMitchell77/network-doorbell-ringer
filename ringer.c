@@ -16,9 +16,11 @@
 #include <signal.h>
 
 static volatile int keepRunning = 1;
+int sockfd;
 
 void intHandler(int dummy) {
-    keepRunning = 0;
+	keepRunning = 0;
+	close(sockfd);
 }
 
 #define MYPORT "4950"	// the port users will be connecting to
@@ -39,7 +41,7 @@ void *get_in_addr(struct sockaddr *sa)
 
 int main(void)
 {
-	int sockfd;
+	
 	struct addrinfo hints, *servinfo, *p;
 	int rv;
 	int numbytes;
@@ -93,7 +95,7 @@ int main(void)
 		//addr_len = sizeof their_addr;
 		if ((numbytes = recvfrom(sockfd, buf, MAXBUFLEN-1 , 0,
 			(struct sockaddr *)&their_addr, &addr_len)) == -1) {
-			perror("recvfrom");
+			//perror("recvfrom");
 			exit(1);
 		}
 

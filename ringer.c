@@ -1,115 +1,296 @@
+/* udp-broadcast-client.c
+ * udp datagram client
+ * Get datagram stock market quotes from UDP broadcast:
+ * see below the step by step explanation
+ */
+ #include <stdio.h>
+ #include <unistd.h>
+ #include <stdlib.h>
+ #include <errno.h>
+ #include <string.h>
+ #include <time.h>
+ #include <signal.h>
+ #include <sys/types.h>
+ #include <sys/socket.h>
+ #include <netinet/in.h>
+ #include <arpa/inet.h>
+
+ #ifndef TRUE
+ #define TRUE 1
+ #define FALSE 0
+ #endif
+
+ extern int mkaddr(
+                   void *addr,
+                   int *addrlen,
+                   char *str_addr,
+                   char *protocol);
+
 /*
-** listener.c -- a datagram sockets "server" demo
+* This function reports the error and
+* exits back to the shell:
 */
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <errno.h>
-#include <string.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <netdb.h>
-
-#include <signal.h>
-
-static volatile int keepRunning = 1;
-int sockfd;
-
-void intHandler(int dummy) {
-	keepRunning = 0;
-	//close(sockfd);
+static void
+displayError(const char *on_what) {
+    fputs(strerror(errno),stderr);
+    fputs(": ",stderr);
+    fputs(on_what,stderr);
+    fputc('\n',stderr);
+    exit(1);
 }
 
-#define MYPORT "4950"	// the port users will be connecting to
+int
+main(int argc,char **argv) {
+    int z;
+    int x;
+    struct sockaddr_in adr;  /* AF_INET */
+    int len_inet;            /* length */
+    int s;                   /* Socket */
+    char dgram[512];         /* Recv buffer */
+    static int so_reuseaddr = TRUE;
+    static char
+    *bc_addr = "192.168.0.255:4950";
 
-#define MAXBUFLEN 30
+    if ( argc > 1 )
+    /* Broadcast address: */
+       bc_addr = argv[1];
 
-#define TIMEOUT_SECONDS      1
+   /*
+    * Create a UDP socket to use:
+    */
+    s = socket(AF_INET,SOCK_DGRAM,0);
+    if ( s == -1 )
+       displayError("socket()");
 
-// get sockaddr, IPv4 or IPv6:
-void *get_in_addr(struct sockaddr *sa)
-{
-	if (sa->sa_family == AF_INET) {
-		return &(((struct sockaddr_in*)sa)->sin_addr);
-	}
+   /*
+    * Form the broadcast address:
+    */
+    len_inet = sizeof adr;
 
-	return &(((struct sockaddr_in6*)sa)->sin6_addr);
-}
+    z = mkaddr(&adr,
+               &len_inet,
+               bc_addr,
+               "udp");
 
-int main(void)
-{	
-	struct addrinfo hints, *servinfo, *p;
-	int rv;
-	int numbytes;
-	struct sockaddr_storage their_addr;
-	char buf[MAXBUFLEN];
-	socklen_t addr_len;
-	char s[INET6_ADDRSTRLEN];
+    if ( z == -1 )
+       displayError("Bad broadcast address");
 
-	signal(SIGINT, intHandler);
+   /*
+    * Allow multiple listeners on the
+    * broadcast address:
+    */
+    z = setsockopt(s,
+                   SOL_SOCKET,
+                   SO_REUSEADDR,
+                   &so_reuseaddr,
+                   sizeof so_reuseaddr);
 
-	memset(&hints, 0, sizeof hints);
-	hints.ai_family = AF_UNSPEC; // set to AF_INET to force IPv4
-	hints.ai_socktype = SOCK_DGRAM;
-	hints.ai_flags = AI_PASSIVE; // use my IP
+    if ( z == -1 )
+       displayError("setsockopt(SO_REUSEADDR)");
 
-	if ((rv = getaddrinfo(NULL, MYPORT, &hints, &servinfo)) != 0) {
-		fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
-		return 1;
-	}
+   /*
+    * Bind our socket to the broadcast address:
+    */
+    //printf("addr=%s\n", bc_addr);
 
-	// loop through all the results and bind to the first we can
-	for(p = servinfo; p != NULL; p = p->ai_next) 
-	{
-		if ((sockfd = socket(p->ai_family, p->ai_socktype,
-				p->ai_protocol)) == -1) {
-			perror("listener: socket");
-			continue;
-		}
+    z = bind(s,
+            (struct sockaddr *)&adr,
+            len_inet);
 
-		struct timeval timeout;      
-		timeout.tv_sec = TIMEOUT_SECONDS;
-		timeout.tv_usec = 0;
+    if ( z == -1 )
+       displayError("bind(2)");
 
-		if (setsockopt (sockfd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout)) < 0)
-			perror("setsockopt failed\n");
+    for (;;) {
 
-		if (bind(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
-			close(sockfd);
-			perror("listener: bind");
-			continue;
-		}
+        //printf("Wait for a broadcast message:\n");
 
-		break;
-	}
+        z = recvfrom(s,      /* Socket */
+                     dgram,  /* Receiving buffer */
+                     sizeof dgram,/* Max rcv buf size */
+                     0,      /* Flags: no options */
+                     (struct sockaddr *)&adr, /* Addr */
+                     &x);    /* Addr len, in & out */
 
-	if (p == NULL) {
-		fprintf(stderr, "listener: failed to bind socket\n");
-		return 2;
-	}
-
-	freeaddrinfo(servinfo);
-
-	//printf("listener: waiting to recvfrom...\n");
-	while (keepRunning) {
-		//addr_len = sizeof their_addr;
-		if ((numbytes = recvfrom(sockfd, buf, MAXBUFLEN-1 , 0,
-			(struct sockaddr *)&their_addr, &addr_len)) == -1) {
-			//perror("recvfrom");
-			//exit(1);
-		}
-		else if ( strncmp(buf, "doorbell-button-press", 21 ) == 0 )
+        if ( z < 0 )
+        {
+           displayError("recvfrom(2)"); /* else err */
+        }
+        else if ( strncmp(dgram, "doorbell-button-press", 21 ) == 0 )
 		{
 			printf("button push!\n");
 			system("aplay doorbell.wav");
 		}
+        else
+        {
+			fwrite(dgram,z,1,stdout);
+			putchar('\n');
 
-	}
+			fflush(stdout);
+        }
+    }
 
-	close(sockfd);
-
-	return 0;
+    return 0;
 }
+
+/* mkaddr.c
+  * The mkaddr() Subroutine using inet_aton
+  * Make a socket address:
+  */
+  #include <stdio.h>
+  #include <unistd.h>
+  #include <stdlib.h>
+  #include <errno.h>
+  #include <ctype.h>
+  #include <string.h>
+  #include <sys/types.h>
+  #include <sys/socket.h>
+  #include <netinet/in.h>
+  #include <arpa/inet.h>
+  #include <netdb.h>
+
+ /*
+  * Create an AF_INET Address:
+  *
+  * ARGUMENTS:
+  * 1. addr Ptr to area
+  * where address is
+  * to be placed.
+  * 2. addrlen Ptr to int that
+  * will hold the final
+  * address length.
+  * 3. str_addr The input string
+  * format hostname, and
+  * port.
+  * 4. protocol The input string
+  * indicating the
+  * protocol being used.
+  * NULL implies  tcp .
+  * RETURNS:
+  * 0 Success.
+  * -1 Bad host part.
+  * -2 Bad port part.
+  *
+  * NOTES:
+  *  *  for the host portion of the
+  * address implies INADDR_ANY.
+  *
+  *  *  for the port portion will
+  * imply zero for the port (assign
+  * a port number).
+  *
+  * EXAMPLES:
+  *  www.lwn.net:80
+  *  localhost:telnet
+  *  *:21
+  *  *:*
+  *  ftp.redhat.com:ftp
+  *  sunsite.unc.edu
+  *  sunsite.unc.edu:*
+  */
+  int mkaddr(void *addr,
+             int *addrlen,
+             char *str_addr,
+             char *protocol) {
+
+  char *inp_addr = strdup(str_addr);
+  char *host_part = strtok(inp_addr, ":" );
+  char *port_part = strtok(NULL, "\n" );
+  struct sockaddr_in *ap =
+  (struct sockaddr_in *) addr;
+  struct hostent *hp = NULL;
+  struct servent *sp = NULL;
+  char *cp;
+  long lv;
+
+ /*
+  * Set input defaults:
+  */
+  if ( !host_part ) {
+	host_part =  "*" ;
+  }
+  if ( !port_part ) {
+	port_part =  "*" ;
+  }
+  if ( !protocol ) {
+	protocol =  "tcp" ;
+  }
+
+ /*
+  * Initialize the address structure:
+  */
+  memset(ap,0,*addrlen);
+  ap->sin_family = AF_INET;
+  ap->sin_port = 0;
+  ap->sin_addr.s_addr = INADDR_ANY;
+
+ /*
+  * Fill in the host address:
+  */
+  if ( strcmp(host_part, "*" ) == 0 ) {
+	; /* Leave as INADDR_ANY */
+  }
+  else if ( isdigit(*host_part) ) {
+   /*
+	* Numeric IP address:
+	*/
+	ap->sin_addr.s_addr =
+	inet_addr(host_part);
+	// if ( ap->sin_addr.s_addr == INADDR_NONE ) {
+	if ( !inet_aton(host_part,&ap->sin_addr) ) {
+           return -1;
+	}
+  }
+  else {
+ /*
+  * Assume a hostname:
+  */
+	hp = gethostbyname(host_part);
+	if ( !hp ) {
+		return -1;
+	}
+	if ( hp->h_addrtype != AF_INET ) {
+		return -1;
+	}
+	ap->sin_addr = * (struct in_addr *)
+					  hp->h_addr_list[0];
+  }
+
+ /*
+  * Process an optional port #:
+  */
+  if ( !strcmp(port_part, "*" ) ) {
+	/* Leave as wild (zero) */
+  }
+  else if ( isdigit(*port_part) ) {
+ /*
+  * Process numeric port #:
+  */
+	lv = strtol(port_part,&cp,10);
+	if ( cp != NULL && *cp ) {
+		return -2;
+	}
+	if ( lv < 0L || lv >= 32768 ) {
+		return -2;
+	}
+	ap->sin_port = htons( (short)lv);
+  }
+  else {
+ /*
+  * Lookup the service:
+  */
+	sp = getservbyname( port_part, protocol);
+	if ( !sp ) {
+		return -2;
+	}
+	ap->sin_port = (short) sp->s_port;
+  }
+
+ /*
+  * Return address length
+  */
+  *addrlen = sizeof *ap;
+
+  free(inp_addr);
+  return 0;
+  }
+

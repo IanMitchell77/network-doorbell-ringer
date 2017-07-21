@@ -27,7 +27,7 @@
 const char* ssid="mitchsoft";
 const char* password="davethecat";
 
-const int buzzer = 13;
+const int buzzer = 15; // pin d8 on the nodemcu board
 
 WiFiUDP UDPTestServer;
 unsigned int UDPPort = 4950;
@@ -55,8 +55,8 @@ void setup() {
         Serial.print(".");
         delay(50);
     }
-
-    delay(100);
+    tone(buzzer, 200);
+    delay(1000);
     
     Serial.println("");
     Serial.println("WiFi connected");
@@ -64,7 +64,9 @@ void setup() {
     Serial.println(WiFi.localIP());
     
     UDPTestServer.begin(UDPPort);
-    
+    tone(buzzer, 2000);
+    delay(500);
+    noTone(buzzer);
     Serial.println("Waiting for button press broadcasts");
 }
 
@@ -77,17 +79,12 @@ void loop()
 
 void playTone(void){
   tone(buzzer, 2000); // Send 1KHz sound signal...
-  //playTone(buzzer, 262, 35);
   digitalWrite(LED_BUILTIN, LOW);
   delay(500);        // ...for 1 sec
   tone(buzzer, 1000); // Send 1KHz sound signal...
-  //playTone(buzzer, 262, 35);
-  digitalWrite(LED_BUILTIN, LOW);
   delay(1000);
   noTone(buzzer);     // Stop sound...
-  //playTone(buzzer, 400, 35);
   digitalWrite(LED_BUILTIN, HIGH);
-  //delay(1000);        // ...for 1sec
 }
 
 void handleUDPServer() {
@@ -98,12 +95,12 @@ void handleUDPServer() {
     for(int i = 0; i < packetSize; i++) {
       myData += (char)packetBuffer[i];
     }
-    //Serial.println(myData);
+    Serial.println(myData);
     char *pbuf = (char *)packetBuffer;
-//sprintf(pbuf, "%s", myData);
+    //sprintf(pbuf, "%s", myData);
     if(strcmp(pbuf, "doorbell-button-press") == 0)
     {
-      //Serial.println("bingo");
+      Serial.println("ring!");
       playTone();
     }
   }
